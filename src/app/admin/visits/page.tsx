@@ -386,31 +386,57 @@ export default function AdminVisitsPage() {
     setShowPatientDropdown(false);
   };
 
+  const [retentionCount, setRetentionCount] = useState(0);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
-      const [resVisits, resPatients, resTherapists, resBranches, resServices, resSession, resInvoices] = await Promise.all([
+      const [resVisits, resPatients, resTherapists, resBranches, resServices, resSession, resInvoices, resRetentionCount] = await Promise.all([
         fetch("/api/patient-visits"),
         fetch("/api/patients"),
-        fetch("/api/therapists?all=true"),
+        fetch("/api/therapists?all=true&simple=true"),
         fetch("/api/branches"),
         fetch("/api/services?all=true"),
         fetch("/api/auth/session"),
-        fetch(`/api/invoices?date=${today}`)
+        fetch(`/api/invoices?date=${today}`),
+        fetch("/api/patients/retention?countOnly=true")
       ]);
-      if (resVisits.ok) setVisits((await resVisits.json()).data || []);
-      if (resPatients.ok) setPatients((await resPatients.json()).data || []);
-      if (resTherapists.ok) setTherapists(await resTherapists.json() || []);
-      if (resBranches.ok) setBranches((await resBranches.json()).data || []);
-      if (resServices.ok) setServices((await resServices.json()).data || []);
-      if (resInvoices.ok) setTodayInvoices((await resInvoices.json()).data || []);
-      if (resSession.ok) {
-        const sessionData = await resSession.json();
-        setSession(sessionData.session);
-        if (sessionData.session.role === "BRANCH_ADMIN" || sessionData.session.role === "CASHIER") {
-          setFormData(prev => ({ ...prev, branchId: sessionData.session.branchId || "" }));
-          setPosBranchId(sessionData.session.branchId || "");
+
+      const [
+        visitsJson,
+        patientsJson,
+        therapistsJson,
+        branchesJson,
+        servicesJson,
+        sessionJson,
+        invoicesJson,
+        retentionCountJson
+      ] = await Promise.all([
+        resVisits.ok ? resVisits.json() : null,
+        resPatients.ok ? resPatients.json() : null,
+        resTherapists.ok ? resTherapists.json() : null,
+        resBranches.ok ? resBranches.json() : null,
+        resServices.ok ? resServices.json() : null,
+        resSession.ok ? resSession.json() : null,
+        resInvoices.ok ? resInvoices.json() : null,
+        resRetentionCount.ok ? resRetentionCount.json() : null,
+      ]);
+
+      if (visitsJson) setVisits(visitsJson.data || []);
+      if (patientsJson) setPatients(patientsJson.data || []);
+      if (therapistsJson) setTherapists(Array.isArray(therapistsJson) ? therapistsJson : therapistsJson.data || []);
+      if (branchesJson) setBranches(branchesJson.data || []);
+      if (servicesJson) setServices(servicesJson.data || []);
+      if (invoicesJson) setTodayInvoices(invoicesJson.data || []);
+      if (retentionCountJson?.total !== undefined) setRetentionCount(retentionCountJson.total);
+
+      if (sessionJson?.session) {
+        const sessionData = sessionJson.session;
+        setSession(sessionData);
+        if (sessionData.role === "BRANCH_ADMIN" || sessionData.role === "CASHIER") {
+          setFormData(prev => ({ ...prev, branchId: sessionData.branchId || "" }));
+          setPosBranchId(sessionData.branchId || "");
         }
       }
     } catch (err) {
@@ -470,39 +496,39 @@ export default function AdminVisitsPage() {
       fetchInvoiceHistory();
     }
   }, [activeTab, historyDate, fetchInvoiceHistory]);
-  const retentionPatients = useMemo(() => {
-    const today = new Date();
-    // 14 days in milliseconds
-    const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
-    
-    // Create a map of patient's latest visit
-    const latestVisits = new Map<string, Date>();
-    visits.forEach(v => {
-      const visitDate = new Date(v.visitDate);
-      if (!latestVisits.has(v.patientId) || visitDate > latestVisits.get(v.patientId)!) {
-        latestVisits.set(v.patientId, visitDate);
-      }
-    });
+  const [retentionData, setRetentionData] = useState<RetentionPatient[]>([]);
+  const [retentionLoading, setRetentionLoading] = useState(false);
 
-    const retentionList: Array<{patient: any, lastVisitDate: Date, daysSinceLastVisit: number}> = [];
-
-    patients.forEach(p => {
-      const lastVisit = latestVisits.get(p.id);
-      if (lastVisit) {
-        const diffMs = today.getTime() - lastVisit.getTime();
-        if (diffMs > fourteenDaysMs) {
-          retentionList.push({
-            patient: p,
-            lastVisitDate: lastVisit,
-            daysSinceLastVisit: Math.floor(diffMs / (1000 * 60 * 60 * 24))
-          });
+  const fetchRetentionData = useCallback(async () => {
+    setRetentionLoading(true);
+    try {
+      const res = await fetch("/api/patients/retention?limit=200");
+      if (res.ok) {
+        const json = await res.json();
+        const mapped: RetentionPatient[] = (json.data || []).map((item: any) => ({
+          patient: item.patient,
+          lastVisitDate: new Date(item.lastVisitDate),
+          daysSinceLastVisit: item.daysSinceLastVisit,
+        }));
+        setRetentionData(mapped);
+        if (json.pagination?.total !== undefined) {
+          setRetentionCount(json.pagination.total);
         }
       }
-    });
+    } catch (err) {
+      console.error("Failed to fetch retention data:", err);
+    } finally {
+      setRetentionLoading(false);
+    }
+  }, []);
 
-    // Sort by days since last visit descending (longest absent first)
-    return retentionList.sort((a, b) => b.daysSinceLastVisit - a.daysSinceLastVisit);
-  }, [visits, patients]);
+  useEffect(() => {
+    if (activeTab === "retention" && retentionData.length === 0) {
+      fetchRetentionData();
+    }
+  }, [activeTab, retentionData.length, fetchRetentionData]);
+
+  const retentionPatients = retentionData;
 
   const handlePOSPhoneChange = (val: string) => {
     setPosPhone(val);
@@ -918,13 +944,18 @@ export default function AdminVisitsPage() {
     setPosModalOpen(true);
   };
 
-  const getPatientName = (id: string) => patients.find(p => p.id === id)?.name || id;
-  const getTherapistName = (id: string | null) => {
+  const patientMap = useMemo(() => new Map<string, any>(patients.map(p => [p.id, p])), [patients]);
+  const therapistMap = useMemo(() => new Map<string, Therapist>(therapists.map(t => [t.id, t])), [therapists]);
+  const serviceMap = useMemo(() => new Map<string, Service>(services.map(s => [s.id, s])), [services]);
+  const branchMap = useMemo(() => new Map<string, Branch>(branches.map(b => [b.id, b])), [branches]);
+
+  const getPatientName = useCallback((id: string) => patientMap.get(id)?.name || id, [patientMap]);
+  const getTherapistName = useCallback((id: string | null) => {
     if (!id) return "-";
-    return therapists.find(t => t.id === id)?.name || id;
-  };
-  const getServiceName = (id: string) => services.find(s => s.id === id)?.name || id;
-  const getBranchName = (id: string) => branches.find(b => b.id === id)?.name || id;
+    return therapistMap.get(id)?.name || id;
+  }, [therapistMap]);
+  const getServiceName = useCallback((id: string) => serviceMap.get(id)?.name || id, [serviceMap]);
+  const getBranchName = useCallback((id: string) => branchMap.get(id)?.name || id, [branchMap]);
 
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [visitToDelete, setVisitToDelete] = useState<string | null>(null);
@@ -958,26 +989,44 @@ export default function AdminVisitsPage() {
     }
   };
 
-  const getVisitSequenceNumber = (patientId: string, visitId: string) => {
-    const patientVisits = visits.filter(v => v.patientId === patientId);
-    const groups: { [key: string]: typeof patientVisits } = {};
-    for (const v of patientVisits) {
-      const key = `${v.visitDate}_${v.visitTime}`;
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(v);
+  const visitSequenceMap = useMemo(() => {
+    const map = new Map<string, number>();
+    const byPatient = new Map<string, typeof visits>();
+    for (const v of visits) {
+      let list = byPatient.get(v.patientId);
+      if (!list) {
+        list = [];
+        byPatient.set(v.patientId, list);
+      }
+      list.push(v);
     }
-    const sortedGroups = Object.values(groups).sort((a, b) => {
-      const dateA = new Date(`${a[0].visitDate}T${(a[0].visitTime || '00:00').replace('.', ':')}:00`).getTime();
-      const dateB = new Date(`${b[0].visitDate}T${(b[0].visitTime || '00:00').replace('.', ':')}:00`).getTime();
-      return dateB - dateA;
-    });
-    const groupIndex = sortedGroups.findIndex(g => g.some(v => v.id === visitId));
-    return groupIndex >= 0 ? sortedGroups.length - groupIndex : 1;
-  };
+    for (const [, pVisits] of byPatient) {
+      const groups: { [key: string]: typeof pVisits } = {};
+      for (const v of pVisits) {
+        const key = `${v.visitDate}_${v.visitTime}`;
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(v);
+      }
+      const sortedGroups = Object.values(groups).sort((a, b) => {
+        const dateA = new Date(`${a[0].visitDate}T${(a[0].visitTime || '00:00').replace('.', ':')}:00`).getTime();
+        const dateB = new Date(`${b[0].visitDate}T${(b[0].visitTime || '00:00').replace('.', ':')}:00`).getTime();
+        return dateB - dateA;
+      });
+      sortedGroups.forEach((group, idx) => {
+        const seq = sortedGroups.length - idx;
+        group.forEach(v => map.set(v.id, seq));
+      });
+    }
+    return map;
+  }, [visits]);
+
+  const getVisitSequenceNumber = useCallback((patientId: string, visitId: string) => {
+    return visitSequenceMap.get(visitId) ?? 1;
+  }, [visitSequenceMap]);
 
   let finalVisits = visits.filter(v => {
     const matchDate = filterDate === "" || v.visitDate === filterDate;
-    const patientName = getPatientName(v.patientId).toLowerCase();
+    const patientName = ((v as any).patientName || getPatientName(v.patientId)).toLowerCase();
     const matchSearch = patientName.includes(searchQuery.toLowerCase());
     const matchPayment = paymentStatusFilter === "ALL" || v.paymentStatus === paymentStatusFilter;
     return matchDate && matchSearch && matchPayment;
@@ -1632,9 +1681,9 @@ export default function AdminVisitsPage() {
           >
             <MessageCircle className="w-4 h-4" />
             Follow-up & Retensi
-            {retentionPatients.length > 0 && (
+            {(retentionCount > 0 || retentionPatients.length > 0) && (
               <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full ml-1">
-                {retentionPatients.length}
+                {retentionCount || retentionPatients.length}
               </span>
             )}
           </button>
@@ -2080,7 +2129,7 @@ export default function AdminVisitsPage() {
                   <div className="divide-y divide-gray-100">
                     {paginatedGroups.map(group => {
                       const v = group[0];
-                      const patientName = getPatientName(v.patientId);
+                      const patientName = (v as any).patientName || getPatientName(v.patientId);
                       const initial = patientName.charAt(0).toUpperCase();
                       const isPaid = group.every(g => g.paymentStatus === "PAID");
                       
@@ -2198,7 +2247,7 @@ export default function AdminVisitsPage() {
                             </td>
                             <td className={tdClass}>
                               <div className="font-bold text-gray-900 flex items-center gap-2">
-                                {getPatientName(v.patientId)}
+                                {(v as any).patientName || getPatientName(v.patientId)}
                                 <button
                                   onClick={() => setSelectedPatientHistoryId(v.patientId)}
                                   className="text-[10px] bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-2 py-0.5 rounded-md border border-indigo-200 transition-colors flex items-center gap-1 font-bold shadow-sm"
@@ -2709,7 +2758,7 @@ export default function AdminVisitsPage() {
               </div>
               <div className="flex flex-wrap items-center gap-2.5">
                 <div className="bg-orange-100 text-orange-700 px-3 py-2 rounded-xl text-xs font-bold shadow-sm">
-                  Total: {retentionPatients.length} Pasien
+                  Total: {retentionCount || retentionPatients.length} Pasien
                 </div>
                 <button
                   onClick={handleExportRetentionExcel}
@@ -2737,7 +2786,16 @@ export default function AdminVisitsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {retentionPatients.length === 0 ? (
+                  {retentionLoading ? (
+                    <tr>
+                      <td colSpan={4} className="px-6 py-12 text-center text-gray-400">
+                        <div className="flex flex-col items-center justify-center">
+                          <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+                          <span className="text-sm font-medium">Memuat data retensi...</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : retentionPatients.length === 0 ? (
                     <tr>
                       <td colSpan={4} className="px-6 py-12 text-center">
                         <div className="bg-gray-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 border border-gray-100">

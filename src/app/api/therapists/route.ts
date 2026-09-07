@@ -13,6 +13,7 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url);
     const fetchAll = searchParams.get("all") === "true";
+    const isSimple = searchParams.get("simple") === "true";
 
     const branchFilter = await getActiveBranchFilter();
 
@@ -26,6 +27,10 @@ export async function GET(request: Request) {
       .from(therapists)
       .where(therapistsConditions.length > 0 ? and(...therapistsConditions) : undefined)
       .orderBy(desc(therapists.joinedAt));
+
+    if (isSimple) {
+      return NextResponse.json(allTherapists);
+    }
 
     // Bulan ini: format YYYY-MM
     const now = new Date();

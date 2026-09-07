@@ -3,26 +3,45 @@ import { patientVisits, patients, therapists } from "@/lib/db/schema";
 import { eq, desc, and, like, isNull } from "drizzle-orm";
 import { getSession, getActiveBranchFilter } from "@/lib/auth";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const session = await getSession();
     if (!session) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const { searchParams } = new URL(request.url);
+    const dateParam = searchParams.get("date");
     const branchFilter = await getActiveBranchFilter();
 
     const visitConditions = [];
     if (branchFilter) {
       visitConditions.push(eq(patientVisits.branchId, branchFilter));
     }
+    if (dateParam) {
+      visitConditions.push(eq(patientVisits.visitDate, dateParam));
+    }
 
     const result = await db
-      .select()
+      .select({
+        visit: patientVisits,
+        patientName: patients.name,
+        patientPhone: patients.phone,
+        patientGender: patients.gender,
+      })
       .from(patientVisits)
+      .leftJoin(patients, eq(patientVisits.patientId, patients.id))
       .where(visitConditions.length > 0 ? and(...visitConditions) : undefined)
       .orderBy(desc(patientVisits.visitDate), desc(patientVisits.visitTime));
-    return Response.json({ data: result });
+
+    const formatted = result.map(r => ({
+      ...r.visit,
+      patientName: r.patientName,
+      patientPhone: r.patientPhone,
+      patientGender: r.patientGender,
+    }));
+
+    return Response.json({ data: formatted });
   } catch (error) {
     console.error("GET /api/patient-visits error:", error);
     return Response.json({ error: "Gagal mengambil data kunjungan" }, { status: 500 });
