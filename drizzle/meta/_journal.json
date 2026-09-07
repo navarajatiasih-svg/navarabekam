@@ -29,6 +29,13 @@
       "when": 1785936504884,
       "tag": "0003_curvy_apocalypse",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786000000000,
+      "tag": "0004_optimize_indexes",
+      "breakpoints": true
     }
   ]
 }

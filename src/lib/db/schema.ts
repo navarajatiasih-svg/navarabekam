@@ -99,7 +99,11 @@ export const inventoryTransactions = pgTable("inventory_transactions", {
   notes: text("notes"),
   branchId: text("branch_id").references(() => branches.id),
   date: text("date").notNull().$defaultFn(() => new Date().toISOString()),
-});
+}, (table) => ({
+  itemIdx: index("inv_tx_item_idx").on(table.itemId),
+  branchIdx: index("inv_tx_branch_idx").on(table.branchId),
+  dateIdx: index("inv_tx_date_idx").on(table.date),
+}));
 
 // ============================================
 // FINANCE CATEGORIES (Master Data Kategori Finansial)
@@ -141,7 +145,10 @@ export const patients = pgTable("patients", {
   gender: text("gender", { enum: ["L", "P"] }),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
-});
+}, (table) => ({
+  phoneIdx: index("patient_phone_idx").on(table.phone),
+  nameIdx: index("patient_name_idx").on(table.name),
+}));
 
 // ============================================
 // PATIENT VISITS (Kunjungan Pasien)
@@ -168,6 +175,9 @@ export const patientVisits = pgTable("patient_visits", {
   branchIdx: index("visit_branch_idx").on(table.branchId),
   dateIdx: index("visit_date_idx").on(table.visitDate),
   therapistIdx: index("visit_therapist_idx").on(table.therapistId),
+  patientIdx: index("visit_patient_idx").on(table.patientId),
+  branchDateIdx: index("visit_branch_date_idx").on(table.branchId, table.visitDate),
+  therapistStatusIdx: index("visit_therapist_status_idx").on(table.therapistId, table.status),
 }));
 
 // ============================================
@@ -229,6 +239,7 @@ export const therapistCommissions = pgTable("therapist_commissions", {
 }, (table) => ({
   therapistIdx: index("commission_therapist_idx").on(table.therapistId),
   visitIdx: index("commission_visit_idx").on(table.visitId),
+  therapistStatusIdx: index("commission_therapist_status_idx").on(table.therapistId, table.status),
 }));
 
 // ============================================
@@ -326,7 +337,10 @@ export const journalEntries = pgTable("journal_entries", {
   description: text("description").notNull(),
   referenceId: text("reference_id"), // Referensi ke financeTransactions atau resi lainnya
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
-});
+}, (table) => ({
+  dateIdx: index("journal_entry_date_idx").on(table.date),
+  refIdx: index("journal_entry_ref_idx").on(table.referenceId),
+}));
 
 // Journal Lines (Detail Debet/Kredit Jurnal)
 export const journalLines = pgTable("journal_lines", {
@@ -335,7 +349,10 @@ export const journalLines = pgTable("journal_lines", {
   accountId: text("account_id").notNull().references(() => accounts.id),
   debit: integer("debit").notNull().default(0),
   credit: integer("credit").notNull().default(0),
-});
+}, (table) => ({
+  entryIdx: index("journal_line_entry_idx").on(table.entryId),
+  accountIdx: index("journal_line_account_idx").on(table.accountId),
+}));
 
 export type Account = typeof accounts.$inferSelect;
 export type NewAccount = typeof accounts.$inferInsert;
@@ -445,6 +462,9 @@ export const invoices = pgTable("invoices", {
   branchIdx: index("invoice_branch_idx").on(table.branchId),
   dateIdx: index("invoice_date_idx").on(table.createdAt),
   therapistIdx: index("invoice_therapist_idx").on(table.therapistId),
+  visitIdx: index("invoice_visit_idx").on(table.visitId),
+  patientIdx: index("invoice_patient_idx").on(table.patientId),
+  branchDateIdx: index("invoice_branch_date_idx").on(table.branchId, table.createdAt),
 }));
 
 export type Invoice = typeof invoices.$inferSelect;
