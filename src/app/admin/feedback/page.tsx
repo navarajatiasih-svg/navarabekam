@@ -35,6 +35,7 @@ import {
 import PageHeader from "@/components/layout/PageHeader";
 import dynamic from "next/dynamic";
 import * as XLSX from "xlsx";
+import { FEEDBACK_CATEGORIES, getCriterionMetadata } from "@/lib/feedbackCriteria";
 
 const QRCodeSVG = dynamic(() => import("qrcode.react").then(m => m.QRCodeSVG), { ssr: false });
 const ResponsiveContainer = dynamic(() => import("recharts").then(m => m.ResponsiveContainer), { ssr: false });
@@ -50,7 +51,7 @@ type FeedbackItem = {
   token: string;
   branchId: string;
   branchName: string | null;
-  branchBrand: string | null;
+  branchBrand: "RADJA_BEKAM" | "NAVARA" | null;
   therapistId: string | null;
   therapistName: string | null;
   invoiceId: string | null;
@@ -64,7 +65,7 @@ type FeedbackItem = {
   serviceRating: number | null;
   valueRating: number | null;
   comment: string | null;
-  aspectRatings: Record<string, number> | null;
+  aspectRatings: Record<string, any> | null;
   wouldRecommend: boolean | null;
   status: "PENDING" | "SUBMITTED" | "FLAGGED";
   submittedAt: string | null;
@@ -1037,6 +1038,128 @@ export default function AdminFeedbackPage() {
                   </span>
                 </div>
               </div>
+
+              {/* Detailed Sub-Criteria Breakdown */}
+              {(() => {
+                const aspects = detailFeedback.aspectRatings
+                  ? (detailFeedback.aspectRatings.subCriteria || detailFeedback.aspectRatings)
+                  : null;
+
+                if (!aspects) return null;
+
+                return (
+                  <div className="bg-slate-50/80 rounded-2xl p-3.5 border border-slate-200/80 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] uppercase font-bold text-slate-600 tracking-wider flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-500" /> Rincian Aspek (1-5 ⭐)
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-semibold">Sub-Kriteria</span>
+                    </div>
+
+                    <div className="space-y-2.5">
+                      {FEEDBACK_CATEGORIES.map((cat) => {
+                        if (cat.id === "therapist" && !detailFeedback.therapistName && !detailFeedback.therapistRating) {
+                          return null;
+                        }
+
+                        const catScores = cat.subCriteria
+                          .map((sub) => ({ ...sub, score: aspects[sub.key] }))
+                          .filter((sub) => typeof sub.score === "number");
+
+                        if (catScores.length === 0) return null;
+
+                        return (
+                          <div key={cat.id} className="bg-white rounded-xl p-2.5 border border-slate-100 shadow-sm space-y-1.5">
+                            <div className="flex items-center justify-between pb-1 border-b border-slate-100">
+                              <span className="text-[11px] font-bold text-slate-800">{cat.title}</span>
+                              <span className="text-[10px] font-semibold text-slate-400">
+                                {catScores.length} aspek dinilai
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-1 gap-1.5 pt-0.5">
+                              {catScores.map((sub) => (
+                                <div key={sub.key} className="flex items-center justify-between text-xs py-0.5 px-1 hover:bg-slate-50 rounded-lg">
+                                  <span className="text-slate-600 font-medium text-[11px] truncate max-w-[200px]" title={sub.description}>
+                                    {sub.label}
+                                  </span>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <div className="flex items-center">
+                                      {[1, 2, 3, 4, 5].map((star) => (
+                                        <Star
+                                          key={star}
+                                          className={`w-3 h-3 ${
+                                            star <= sub.score
+                                              ? "fill-amber-400 text-amber-400"
+                                              : "text-slate-200"
+                                          }`}
+                                        />
+                                      ))}
+                                    </div>
+                                    <span className="font-bold text-[11px] text-slate-700 w-6 text-right">
+                                      {sub.score}.0
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      {/* Fallback for legacy feedbacks */}
+                      {(() => {
+                        const legacyKeys = ["cleanliness", "friendliness", "punctuality", "comfort", "technique"];
+                        const hasNewCriteria = FEEDBACK_CATEGORIES.some((c) =>
+                          c.subCriteria.some((s) => s.key in aspects)
+                        );
+                        if (hasNewCriteria) return null;
+
+                        const legacyItems = legacyKeys
+                          .filter((k) => typeof aspects[k] === "number")
+                          .map((k) => ({
+                            key: k,
+                            ...getCriterionMetadata(k),
+                            score: aspects[k],
+                          }));
+
+                        if (legacyItems.length === 0) return null;
+
+                        return (
+                          <div className="bg-white rounded-xl p-2.5 border border-slate-100 shadow-sm space-y-1.5">
+                            <span className="text-[11px] font-bold text-slate-800 block pb-1 border-b border-slate-100">
+                              Penilaian Aspek Umum
+                            </span>
+                            <div className="grid grid-cols-1 gap-1.5 pt-0.5">
+                              {legacyItems.map((item) => (
+                                <div key={item.key} className="flex items-center justify-between text-xs py-0.5 px-1">
+                                  <span className="text-slate-600 font-medium text-[11px]">{item.label}</span>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <div className="flex items-center">
+                                      {[1, 2, 3, 4, 5].map((star) => (
+                                        <Star
+                                          key={star}
+                                          className={`w-3 h-3 ${
+                                            star <= item.score
+                                              ? "fill-amber-400 text-amber-400"
+                                              : "text-slate-200"
+                                          }`}
+                                        />
+                                      ))}
+                                    </div>
+                                    <span className="font-bold text-[11px] text-slate-700 w-6 text-right">
+                                      {item.score}.0
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Comment */}
               <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">

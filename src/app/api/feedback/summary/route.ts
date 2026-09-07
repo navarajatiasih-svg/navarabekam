@@ -4,6 +4,7 @@ import { customerFeedbacks, branches, therapists } from "@/lib/db/schema";
 import { eq, and, gte, lte } from "drizzle-orm";
 import { getSession, getActiveBranchFilter } from "@/lib/auth";
 import { ensureFeedbackTable } from "@/lib/db/feedback-init";
+import { FEEDBACK_CATEGORIES } from "@/lib/feedbackCriteria";
 
 export async function GET(request: Request) {
   try {
@@ -96,7 +97,7 @@ export async function GET(request: Request) {
       averageRating: Number(avg(t.ratings).toFixed(1)),
     })).sort((a: any, b: any) => b.averageRating - a.averageRating || b.reviewCount - a.reviewCount);
 
-    // Aspect breakdown (Cleanliness, Friendliness, Punctuality, etc.)
+    // Aspect breakdown (Cleanliness, Friendliness, Punctuality, etc. + Detailed Sub-Criteria)
     const aspectTotals: Record<string, number[]> = {
       cleanliness: [],
       friendliness: [],
@@ -105,13 +106,36 @@ export async function GET(request: Request) {
       technique: [],
     };
 
+    const subCriteriaTotals: Record<string, number[]> = {};
+    FEEDBACK_CATEGORIES.forEach((cat) => {
+      cat.subCriteria.forEach((sub) => {
+        subCriteriaTotals[sub.key] = [];
+      });
+    });
+
     submitted.forEach((f: any) => {
       if (f.feedback.aspectRatings) {
         try {
           const parsed = JSON.parse(f.feedback.aspectRatings);
-          Object.keys(aspectTotals).forEach(key => {
-            if (typeof parsed[key] === "number" && parsed[key] > 0) {
-              aspectTotals[key].push(parsed[key]);
+          const subObj = parsed.subCriteria || parsed;
+
+          // Legacy aspects
+          Object.keys(aspectTotals).forEach((key) => {
+            const val =
+              typeof parsed[key] === "number" && parsed[key] > 0
+                ? parsed[key]
+                : typeof subObj[key] === "number" && subObj[key] > 0
+                ? subObj[key]
+                : null;
+            if (val !== null) {
+              aspectTotals[key].push(val);
+            }
+          });
+
+          // Detailed sub-criteria
+          Object.keys(subCriteriaTotals).forEach((key) => {
+            if (typeof subObj[key] === "number" && subObj[key] > 0) {
+              subCriteriaTotals[key].push(subObj[key]);
             }
           });
         } catch {
@@ -131,6 +155,14 @@ export async function GET(request: Request) {
       average: Number(avg(list).toFixed(1)),
       count: list.length,
     }));
+
+    const subCriteriaAverages = Object.entries(subCriteriaTotals)
+      .filter(([_, list]) => list.length > 0)
+      .map(([key, list]) => ({
+        key,
+        average: Number(avg(list).toFixed(1)),
+        count: list.length,
+      }));
 
     // Weekly / Monthly Trend (Last 7 days or Last 30 days)
     const dailyMap: Record<string, { date: string; count: number; sum: number }> = {};
@@ -167,6 +199,7 @@ export async function GET(request: Request) {
         starDistribution,
         therapistRanking,
         aspectAverages,
+        subCriteriaAverages,
         trendData,
       },
     });
