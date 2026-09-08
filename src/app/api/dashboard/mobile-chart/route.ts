@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { financeTransactions, patientVisits } from "@/lib/db/schema";
-import { sql, eq, and, like } from "drizzle-orm";
+import { sql, eq, and, like, gte, lt } from "drizzle-orm";
 import { getActiveBranchFilter } from "@/lib/auth";
 
 export async function GET(request: Request) {
@@ -9,14 +9,24 @@ export async function GET(request: Request) {
     const branchFilter = await getActiveBranchFilter();
     
     // 1. Calculate Today's Revenue
-    const todayStr = new Date().toISOString().split("T")[0];
+    const today = new Date();
+    const todayStr = today.toISOString().split("T")[0];
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split("T")[0];
+
+    const todayDateCond = and(
+      gte(financeTransactions.date, todayStr),
+      lt(financeTransactions.date, tomorrowStr)
+    );
+
     let todayRevenueQuery = db
       .select({ totalAmount: sql<number>`SUM(${financeTransactions.amount})` })
       .from(financeTransactions)
       .where(
         and(
           eq(financeTransactions.type, "INCOME"),
-          sql`date(${financeTransactions.date}::timestamp) = ${todayStr}`
+          todayDateCond
         )
       );
 
@@ -27,7 +37,7 @@ export async function GET(request: Request) {
         .where(
           and(
             eq(financeTransactions.type, "INCOME"),
-            sql`date(${financeTransactions.date}::timestamp) = ${todayStr}`,
+            todayDateCond,
             eq(financeTransactions.branchId, branchFilter)
           )
         );
@@ -45,7 +55,7 @@ export async function GET(request: Request) {
     let financeQuery = db
       .select({ date: financeTransactions.date, amount: financeTransactions.amount, type: financeTransactions.type })
       .from(financeTransactions)
-      .where(sql`date(${financeTransactions.date}::timestamp) >= ${sevenDaysAgoStr}`);
+      .where(gte(financeTransactions.date, sevenDaysAgoStr));
       
     if (branchFilter) {
       financeQuery = db
@@ -53,7 +63,7 @@ export async function GET(request: Request) {
         .from(financeTransactions)
         .where(
           and(
-            sql`date(${financeTransactions.date}::timestamp) >= ${sevenDaysAgoStr}`,
+            gte(financeTransactions.date, sevenDaysAgoStr),
             eq(financeTransactions.branchId, branchFilter)
           )
         );
@@ -67,7 +77,7 @@ export async function GET(request: Request) {
       .where(
         and(
           eq(patientVisits.status, "completed"),
-          sql`date(${patientVisits.visitDate}) >= ${sevenDaysAgoStr}`
+          gte(patientVisits.visitDate, sevenDaysAgoStr)
         )
       );
 
@@ -78,7 +88,7 @@ export async function GET(request: Request) {
         .where(
           and(
             eq(patientVisits.status, "completed"),
-            sql`date(${patientVisits.visitDate}) >= ${sevenDaysAgoStr}`,
+            gte(patientVisits.visitDate, sevenDaysAgoStr),
             eq(patientVisits.branchId, branchFilter)
           )
         );
@@ -115,13 +125,30 @@ export async function GET(request: Request) {
 
     // 3. Income vs Outcome Ratio for the current month
     const currentMonth = todayStr.substring(0, 7);
+    const [curYearStr, curMthStr] = currentMonth.split('-');
+    const curYear = parseInt(curYearStr, 10);
+    const curMth = parseInt(curMthStr, 10);
+    const monthStart = `${currentMonth}-01`;
+    let nextYear = curYear;
+    let nextMonth = curMth + 1;
+    if (nextMonth > 12) {
+      nextMonth = 1;
+      nextYear += 1;
+    }
+    const monthEnd = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
+
+    const monthFinanceCond = and(
+      gte(financeTransactions.date, monthStart),
+      lt(financeTransactions.date, monthEnd)
+    );
+
     let monthFinanceQuery = db
       .select({
         type: financeTransactions.type,
         totalAmount: sql<number>`SUM(${financeTransactions.amount})`
       })
       .from(financeTransactions)
-      .where(sql`to_char(${financeTransactions.date}::timestamp, 'YYYY-MM') = ${currentMonth}`);
+      .where(monthFinanceCond);
       
     if (branchFilter) {
       monthFinanceQuery = db
@@ -132,7 +159,7 @@ export async function GET(request: Request) {
         .from(financeTransactions)
         .where(
           and(
-            sql`to_char(${financeTransactions.date}::timestamp, 'YYYY-MM') = ${currentMonth}`,
+            monthFinanceCond,
             eq(financeTransactions.branchId, branchFilter)
           )
         );

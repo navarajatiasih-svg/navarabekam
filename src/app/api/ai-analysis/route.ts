@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { financeTransactions, patientVisits, monthlyTargets, therapists } from "@/lib/db/schema";
-import { sql, eq, and } from "drizzle-orm";
+import { sql, eq, and, gte, lt } from "drizzle-orm";
 import { getActiveBranchFilter } from "@/lib/auth";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
@@ -12,6 +12,18 @@ export async function GET(request: Request) {
       const now = new Date();
       return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     })();
+
+    const [yearStr, mthStr] = month.split('-');
+    const year = parseInt(yearStr, 10);
+    const mth = parseInt(mthStr, 10);
+    const monthStart = `${month}-01`;
+    let nextYear = year;
+    let nextMonth = mth + 1;
+    if (nextMonth > 12) {
+      nextMonth = 1;
+      nextYear += 1;
+    }
+    const monthEnd = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
 
     const apiKey = process.env.GEMINI_API_KEY?.trim();
     if (!apiKey) {
@@ -32,7 +44,10 @@ export async function GET(request: Request) {
       })
       .from(financeTransactions);
 
-    const dateCondition = sql`to_char(${financeTransactions.date}::timestamp, 'YYYY-MM') = ${month}`;
+    const dateCondition = and(
+      gte(financeTransactions.date, monthStart),
+      lt(financeTransactions.date, monthEnd)
+    );
     if (branchFilter) {
       monthFinanceQuery = monthFinanceQuery.where(and(dateCondition, eq(financeTransactions.branchId, branchFilter))) as any;
     } else {
@@ -66,7 +81,10 @@ export async function GET(request: Request) {
       .select({ count: sql<number>`COUNT(${patientVisits.id})` })
       .from(patientVisits);
       
-    const visitDateCondition = sql`to_char(${patientVisits.visitDate}::timestamp, 'YYYY-MM') = ${month}`;
+    const visitDateCondition = and(
+      gte(patientVisits.visitDate, monthStart),
+      lt(patientVisits.visitDate, monthEnd)
+    );
     if (branchFilter) {
       visitsQuery = visitsQuery.where(and(visitDateCondition, eq(patientVisits.branchId, branchFilter))) as any;
     } else {
@@ -109,7 +127,7 @@ Data Performa Cabang Klinik (Bulan: ${month}):
    - Kedatangan Aktual: ${actualVisits} orang (${totalTargetVisits > 0 ? Math.round((actualVisits/totalTargetVisits)*100) : 0}% dari target)
 
 3. Performa Terapis Terbaik (Top 5 berdasarkan jumlah treatment bulan ini):
-${therapistStats.length > 0 ? therapistStats.map(t => `   - ${t.therapistName}: melayani ${t.treatmentCount} pasien`).join('\n') : "   - Belum ada data treatment untuk bulan ini."}
+${therapistStats.length > 0 ? therapistStats.map((t: any) => `   - ${t.therapistName}: melayani ${t.treatmentCount} pasien`).join('\n') : "   - Belum ada data treatment untuk bulan ini."}
 `;
 
     const prompt = `

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { financeTransactions, inventoryItems, patientVisits, services, attendance, reservations } from "@/lib/db/schema";
-import { sql, eq, and, inArray, desc } from "drizzle-orm";
+import { sql, eq, and, inArray, desc, gte, lt } from "drizzle-orm";
 import { getActiveBranchFilter } from "@/lib/auth";
 
 export async function GET(request: Request) {
@@ -11,6 +11,30 @@ export async function GET(request: Request) {
       const now = new Date();
       return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     })();
+
+    // Compute month boundaries for index range queries
+    const [yearStr, mthStr] = month.split('-');
+    const year = parseInt(yearStr, 10);
+    const mth = parseInt(mthStr, 10);
+    const monthStart = `${month}-01`;
+    let nextYear = year;
+    let nextMonth = mth + 1;
+    if (nextMonth > 12) {
+      nextMonth = 1;
+      nextYear += 1;
+    }
+    const nextMonthStr = `${nextYear}-${String(nextMonth).padStart(2, '0')}`;
+    const monthEnd = `${nextMonthStr}-01`;
+
+    let lmYear = year;
+    let lmMonth = mth - 1;
+    if (lmMonth === 0) {
+      lmMonth = 12;
+      lmYear -= 1;
+    }
+    const lastMonthStr = `${lmYear}-${String(lmMonth).padStart(2, '0')}`;
+    const lastMonthStart = `${lastMonthStr}-01`;
+    const lastMonthEnd = monthStart;
 
     let branchFilter = await getActiveBranchFilter();
     if (branchFilter === "ALL") branchFilter = null;
@@ -47,7 +71,10 @@ export async function GET(request: Request) {
       })
       .from(financeTransactions);
 
-    const dateCondition = sql`to_char(${financeTransactions.date}::timestamp, 'YYYY-MM') = ${month}`;
+    const dateCondition = and(
+      gte(financeTransactions.date, monthStart),
+      lt(financeTransactions.date, monthEnd)
+    );
     if (branchFilter) {
       monthFinanceQuery = monthFinanceQuery.where(and(dateCondition, eq(financeTransactions.branchId, branchFilter))) as any;
     } else {
@@ -67,15 +94,6 @@ export async function GET(request: Request) {
     const labaBersih = monthIncome - monthExpense;
 
     // 2.5 Pendapatan & Pengeluaran Bulan Lalu
-    const [year, mth] = month.split('-');
-    let lmYear = parseInt(year);
-    let lmMonth = parseInt(mth) - 1;
-    if (lmMonth === 0) {
-      lmMonth = 12;
-      lmYear -= 1;
-    }
-    const lastMonthStr = `${lmYear}-${String(lmMonth).padStart(2, '0')}`;
-
     let lastMonthFinanceQuery = db
       .select({
         type: financeTransactions.type,
@@ -83,7 +101,10 @@ export async function GET(request: Request) {
       })
       .from(financeTransactions);
 
-    const lmDateCondition = sql`to_char(${financeTransactions.date}::timestamp, 'YYYY-MM') = ${lastMonthStr}`;
+    const lmDateCondition = and(
+      gte(financeTransactions.date, lastMonthStart),
+      lt(financeTransactions.date, lastMonthEnd)
+    );
     if (branchFilter) {
       lastMonthFinanceQuery = lastMonthFinanceQuery.where(and(lmDateCondition, eq(financeTransactions.branchId, branchFilter))) as any;
     } else {
@@ -110,21 +131,35 @@ export async function GET(request: Request) {
     const totalPersediaan = inventoryQuery[0]?.totalStock || 0;
 
     // 4. Pasien Hari Ini & Kemarin
-    const todayStr = new Date().toISOString().split("T")[0];
-    const yesterday = new Date();
+    const today = new Date();
+    const todayStr = today.toISOString().split("T")[0];
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split("T")[0];
+
+    const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
     const yesterdayStr = yesterday.toISOString().split("T")[0];
+
+    const todayVisitCondition = and(
+      gte(patientVisits.visitDate, todayStr),
+      lt(patientVisits.visitDate, tomorrowStr)
+    );
+    const yesterdayVisitCondition = and(
+      gte(patientVisits.visitDate, yesterdayStr),
+      lt(patientVisits.visitDate, todayStr)
+    );
 
     let dailyVisitsQuery = db
       .select({ count: sql<number>`count(*)` })
       .from(patientVisits)
-      .where(sql`date(${patientVisits.visitDate}) = ${todayStr}`);
+      .where(todayVisitCondition);
 
     if (branchFilter) {
       dailyVisitsQuery = db
         .select({ count: sql<number>`count(*)` })
         .from(patientVisits)
-        .where(and(sql`date(${patientVisits.visitDate}) = ${todayStr}`, eq(patientVisits.branchId, branchFilter)));
+        .where(and(todayVisitCondition, eq(patientVisits.branchId, branchFilter)));
     }
 
     const dailyVisitsResult = await dailyVisitsQuery;
@@ -133,18 +168,27 @@ export async function GET(request: Request) {
     let yesterdayVisitsQuery = db
       .select({ count: sql<number>`count(*)` })
       .from(patientVisits)
-      .where(sql`date(${patientVisits.visitDate}) = ${yesterdayStr}`);
+      .where(yesterdayVisitCondition);
 
     if (branchFilter) {
       yesterdayVisitsQuery = db
         .select({ count: sql<number>`count(*)` })
         .from(patientVisits)
-        .where(and(sql`date(${patientVisits.visitDate}) = ${yesterdayStr}`, eq(patientVisits.branchId, branchFilter)));
+        .where(and(yesterdayVisitCondition, eq(patientVisits.branchId, branchFilter)));
     }
     const yesterdayVisitsResult = await yesterdayVisitsQuery;
     const yesterdayVisits = yesterdayVisitsResult[0]?.count || 0;
 
     // 5. Pendapatan Hari Ini & Kemarin
+    const todayFinanceCondition = and(
+      gte(financeTransactions.date, todayStr),
+      lt(financeTransactions.date, tomorrowStr)
+    );
+    const yesterdayFinanceCondition = and(
+      gte(financeTransactions.date, yesterdayStr),
+      lt(financeTransactions.date, todayStr)
+    );
+
     let dailyIncomeQuery = db
       .select({
         totalAmount: sql<number>`SUM(${financeTransactions.amount})`,
@@ -152,7 +196,7 @@ export async function GET(request: Request) {
       })
       .from(financeTransactions)
       .where(and(
-        sql`date(${financeTransactions.date}::timestamp) = ${todayStr}`,
+        todayFinanceCondition,
         eq(financeTransactions.type, "INCOME")
       ));
 
@@ -164,7 +208,7 @@ export async function GET(request: Request) {
         })
         .from(financeTransactions)
         .where(and(
-          sql`date(${financeTransactions.date}::timestamp) = ${todayStr}`,
+          todayFinanceCondition,
           eq(financeTransactions.type, "INCOME"),
           eq(financeTransactions.branchId, branchFilter)
         ));
@@ -178,7 +222,7 @@ export async function GET(request: Request) {
       .select({ totalAmount: sql<number>`SUM(${financeTransactions.amount})` })
       .from(financeTransactions)
       .where(and(
-        sql`date(${financeTransactions.date}::timestamp) = ${yesterdayStr}`,
+        yesterdayFinanceCondition,
         eq(financeTransactions.type, "INCOME")
       ));
 
@@ -187,7 +231,7 @@ export async function GET(request: Request) {
         .select({ totalAmount: sql<number>`SUM(${financeTransactions.amount})` })
         .from(financeTransactions)
         .where(and(
-          sql`date(${financeTransactions.date}::timestamp) = ${yesterdayStr}`,
+          yesterdayFinanceCondition,
           eq(financeTransactions.type, "INCOME"),
           eq(financeTransactions.branchId, branchFilter)
         ));
@@ -200,7 +244,7 @@ export async function GET(request: Request) {
       .select({ totalAmount: sql<number>`SUM(${financeTransactions.amount})` })
       .from(financeTransactions)
       .where(and(
-        sql`date(${financeTransactions.date}::timestamp) = ${todayStr}`,
+        todayFinanceCondition,
         eq(financeTransactions.type, "EXPENSE"),
         sql`lower(${financeTransactions.category}) != 'bagi hasil terapis'`
       ));
@@ -210,7 +254,7 @@ export async function GET(request: Request) {
         .select({ totalAmount: sql<number>`SUM(${financeTransactions.amount})` })
         .from(financeTransactions)
         .where(and(
-          sql`date(${financeTransactions.date}::timestamp) = ${todayStr}`,
+          todayFinanceCondition,
           eq(financeTransactions.type, "EXPENSE"),
           sql`lower(${financeTransactions.category}) != 'bagi hasil terapis'`,
           eq(financeTransactions.branchId, branchFilter)
@@ -223,7 +267,7 @@ export async function GET(request: Request) {
       .select({ totalAmount: sql<number>`SUM(${financeTransactions.amount})` })
       .from(financeTransactions)
       .where(and(
-        sql`date(${financeTransactions.date}::timestamp) = ${yesterdayStr}`,
+        yesterdayFinanceCondition,
         eq(financeTransactions.type, "EXPENSE"),
         sql`lower(${financeTransactions.category}) != 'bagi hasil terapis'`
       ));
@@ -233,7 +277,7 @@ export async function GET(request: Request) {
         .select({ totalAmount: sql<number>`SUM(${financeTransactions.amount})` })
         .from(financeTransactions)
         .where(and(
-          sql`date(${financeTransactions.date}::timestamp) = ${yesterdayStr}`,
+          yesterdayFinanceCondition,
           eq(financeTransactions.type, "EXPENSE"),
           sql`lower(${financeTransactions.category}) != 'bagi hasil terapis'`,
           eq(financeTransactions.branchId, branchFilter)
@@ -267,13 +311,18 @@ export async function GET(request: Request) {
     const terapisHarian = dailyTherapistsResult[0]?.count || 0;
 
     // 6. Top Layanan Bulan Ini
+    const topServicesDateCond = and(
+      gte(patientVisits.visitDate, monthStart),
+      lt(patientVisits.visitDate, monthEnd)
+    );
+
     let topServicesQuery = db
       .select({
         serviceId: patientVisits.serviceId,
         count: sql<number>`count(*)`
       })
       .from(patientVisits)
-      .where(sql`to_char(${patientVisits.visitDate}::timestamp, 'YYYY-MM') = ${month}`);
+      .where(topServicesDateCond);
 
     if (branchFilter) {
       topServicesQuery = db
@@ -283,7 +332,7 @@ export async function GET(request: Request) {
         })
         .from(patientVisits)
         .where(and(
-          sql`to_char(${patientVisits.visitDate}::timestamp, 'YYYY-MM') = ${month}`,
+          topServicesDateCond,
           eq(patientVisits.branchId, branchFilter)
         ));
     }
@@ -293,16 +342,16 @@ export async function GET(request: Request) {
     let topServicesToday: { name: string; count: number; percentage: number }[] = [];
     
     if (topServicesStats.length > 0) {
-      const serviceIds = topServicesStats.map(s => s.serviceId);
+      const serviceIds = topServicesStats.map((s: any) => s.serviceId);
       const servicesData = await db
         .select({ id: services.id, name: services.name })
         .from(services)
         .where(inArray(services.id, serviceIds));
         
-      const totalTopServices = topServicesStats.reduce((sum, s) => sum + Number(s.count), 0);
+      const totalTopServices = topServicesStats.reduce((sum: number, s: any) => sum + Number(s.count), 0);
       
-      topServicesToday = topServicesStats.map(stat => {
-        const serviceName = servicesData.find(s => s.id === stat.serviceId)?.name || 'Unknown';
+      topServicesToday = topServicesStats.map((stat: any) => {
+        const serviceName = servicesData.find((s: any) => s.id === stat.serviceId)?.name || 'Unknown';
         return {
           name: serviceName,
           count: Number(stat.count),
@@ -326,11 +375,11 @@ export async function GET(request: Request) {
        
        const fallbackStats = await fallbackQuery.groupBy(patientVisits.serviceId).orderBy(desc(sql`count(*)`)).limit(4);
        if (fallbackStats.length > 0) {
-         const fallbackIds = fallbackStats.map(s => s.serviceId);
+         const fallbackIds = fallbackStats.map((s: any) => s.serviceId);
          const fallbackData = await db.select({ id: services.id, name: services.name }).from(services).where(inArray(services.id, fallbackIds));
-         const fallbackTotal = fallbackStats.reduce((sum, s) => sum + Number(s.count), 0);
-         topServicesToday = fallbackStats.map(stat => ({
-           name: fallbackData.find(s => s.id === stat.serviceId)?.name || 'Unknown',
+         const fallbackTotal = fallbackStats.reduce((sum: number, s: any) => sum + Number(s.count), 0);
+         topServicesToday = fallbackStats.map((stat: any) => ({
+           name: fallbackData.find((s: any) => s.id === stat.serviceId)?.name || 'Unknown',
            count: Number(stat.count),
            percentage: fallbackTotal > 0 ? Math.round((Number(stat.count) / fallbackTotal) * 100) : 0
          }));

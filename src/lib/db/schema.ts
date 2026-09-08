@@ -31,7 +31,7 @@ export const services = pgTable("services", {
   category: text("category", { enum: ["Paket Treatment", "Full Body Massages", "Refleksi", "Bekam", "Adds On", "Mcu"] }).notNull().default("Paket Treatment"),
   branchId: text("branch_id").references(() => branches.id),
   isActive: boolean("is_active").notNull().default(true),
-}, (table) => ({
+}, (table: any) => ({
   branchIdx: index("service_branch_idx").on(table.branchId),
 }));
 
@@ -44,7 +44,7 @@ export const serviceBranchPrices = pgTable("service_branch_prices", {
   branchId: text("branch_id").notNull().references(() => branches.id),
   price: integer("price").notNull(),
   commission: integer("commission"),  // Override komisi, null = pakai globalCommission dari services
-}, (table) => ({
+}, (table: any) => ({
   serviceIdx: index("sbp_service_idx").on(table.serviceId),
   branchIdx: index("sbp_branch_idx").on(table.branchId),
   uniqueIdx: index("sbp_unique_idx").on(table.serviceId, table.branchId),
@@ -70,7 +70,7 @@ export const therapists = pgTable("therapists", {
   availabilityStatus: text("availability_status", { enum: ["AVAILABLE", "BUSY", "BREAK", "OFF"] }).notNull().default("AVAILABLE"),
   isActive: boolean("is_active").notNull().default(true),
   joinedAt: text("joined_at").notNull().$defaultFn(() => new Date().toISOString()),
-}, (table) => ({
+}, (table: any) => ({
   branchIdx: index("therapist_branch_idx").on(table.branchId),
 }));
 
@@ -99,7 +99,7 @@ export const inventoryTransactions = pgTable("inventory_transactions", {
   notes: text("notes"),
   branchId: text("branch_id").references(() => branches.id),
   date: text("date").notNull().$defaultFn(() => new Date().toISOString()),
-}, (table) => ({
+}, (table: any) => ({
   itemIdx: index("inv_tx_item_idx").on(table.itemId),
   branchIdx: index("inv_tx_branch_idx").on(table.branchId),
   dateIdx: index("inv_tx_date_idx").on(table.date),
@@ -129,9 +129,12 @@ export const financeTransactions = pgTable("finance_transactions", {
   paymentMethod: text("payment_method").notNull().default("CASH"), // e.g., "CASH", "TRANSFER", "EWALLET"
   attachmentUrl: text("attachment_url"), // URL/Link bukti transaksi
   date: text("date").notNull().$defaultFn(() => new Date().toISOString()),
-}, (table) => ({
+}, (table: any) => ({
   branchIdx: index("finance_branch_idx").on(table.branchId),
   dateIdx: index("finance_date_idx").on(table.date),
+  typeIdx: index("finance_type_idx").on(table.type),
+  referenceIdx: index("finance_reference_idx").on(table.referenceId),
+  typeBranchDateIdx: index("finance_type_branch_date_idx").on(table.type, table.branchId, table.date),
 }));
 
 // ============================================
@@ -145,7 +148,7 @@ export const patients = pgTable("patients", {
   gender: text("gender", { enum: ["L", "P"] }),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
-}, (table) => ({
+}, (table: any) => ({
   phoneIdx: index("patient_phone_idx").on(table.phone),
   nameIdx: index("patient_name_idx").on(table.name),
 }));
@@ -171,13 +174,15 @@ export const patientVisits = pgTable("patient_visits", {
   paymentStatus: text("payment_status", { enum: ["UNPAID", "PAID"] }).notNull().default("UNPAID"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
-}, (table) => ({
+}, (table: any) => ({
   branchIdx: index("visit_branch_idx").on(table.branchId),
   dateIdx: index("visit_date_idx").on(table.visitDate),
   therapistIdx: index("visit_therapist_idx").on(table.therapistId),
   patientIdx: index("visit_patient_idx").on(table.patientId),
   branchDateIdx: index("visit_branch_date_idx").on(table.branchId, table.visitDate),
   therapistStatusIdx: index("visit_therapist_status_idx").on(table.therapistId, table.status),
+  statusIdx: index("visit_status_idx").on(table.status),
+  serviceIdx: index("visit_service_idx").on(table.serviceId),
 }));
 
 // ============================================
@@ -196,9 +201,10 @@ export const reservations = pgTable("reservations", {
   status: text("status", { enum: ["PENDING", "CONFIRMED", "COMPLETED", "CANCELLED"] }).notNull().default("PENDING"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
-}, (table) => ({
+}, (table: any) => ({
   branchIdx: index("reservation_branch_idx").on(table.branchId),
   dateIdx: index("reservation_date_idx").on(table.date),
+  statusIdx: index("reservation_status_idx").on(table.status),
 }));
 
 // ============================================
@@ -236,7 +242,7 @@ export const therapistCommissions = pgTable("therapist_commissions", {
   status: text("status", { enum: ["PENDING", "PAID"] }).notNull().default("PENDING"),
   paidAt: text("paid_at"), // When status becomes PAID
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
-}, (table) => ({
+}, (table: any) => ({
   therapistIdx: index("commission_therapist_idx").on(table.therapistId),
   visitIdx: index("commission_visit_idx").on(table.visitId),
   therapistStatusIdx: index("commission_therapist_status_idx").on(table.therapistId, table.status),
@@ -337,7 +343,7 @@ export const journalEntries = pgTable("journal_entries", {
   description: text("description").notNull(),
   referenceId: text("reference_id"), // Referensi ke financeTransactions atau resi lainnya
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
-}, (table) => ({
+}, (table: any) => ({
   dateIdx: index("journal_entry_date_idx").on(table.date),
   refIdx: index("journal_entry_ref_idx").on(table.referenceId),
 }));
@@ -349,7 +355,7 @@ export const journalLines = pgTable("journal_lines", {
   accountId: text("account_id").notNull().references(() => accounts.id),
   debit: integer("debit").notNull().default(0),
   credit: integer("credit").notNull().default(0),
-}, (table) => ({
+}, (table: any) => ({
   entryIdx: index("journal_line_entry_idx").on(table.entryId),
   accountIdx: index("journal_line_account_idx").on(table.accountId),
 }));
@@ -376,10 +382,11 @@ export const attendance = pgTable("attendance", {
   status: text("status", { enum: ["PRESENT", "LATE", "ABSENT"] }).notNull().default("PRESENT"),
   notes: text("notes"),
   photoUrl: text("photo_url"),
-}, (table) => ({
+}, (table: any) => ({
   branchIdx: index("attendance_branch_idx").on(table.branchId),
   therapistIdx: index("attendance_therapist_idx").on(table.therapistId),
   dateIdx: index("attendance_date_idx").on(table.date),
+  therapistDateIdx: index("attendance_therapist_date_idx").on(table.therapistId, table.date),
 }));
 
 // ============================================
@@ -390,7 +397,10 @@ export const therapistServiceCommissions = pgTable("therapist_service_commission
   therapistId: text("therapist_id").notNull().references(() => therapists.id),
   serviceId: text("service_id").notNull().references(() => services.id),
   commissionAmount: integer("commission_amount").notNull(),
-});
+}, (table: any) => ({
+  therapistIdx: index("tsc_therapist_idx").on(table.therapistId),
+  therapistServiceIdx: index("tsc_therapist_service_idx").on(table.therapistId, table.serviceId),
+}));
 
 export type Attendance = typeof attendance.$inferSelect;
 export type NewAttendance = typeof attendance.$inferInsert;
@@ -425,7 +435,9 @@ export const therapistMonthlyReports = pgTable("therapist_monthly_reports", {
   rating: text("rating"), // Rating rata-rata (misal "4.8")
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
-});
+}, (table: any) => ({
+  therapistIdx: index("tmr_therapist_idx").on(table.therapistId),
+}));
 
 export type TherapistMonthlyReport = typeof therapistMonthlyReports.$inferSelect;
 export type NewTherapistMonthlyReport = typeof therapistMonthlyReports.$inferInsert;
@@ -458,13 +470,14 @@ export const invoices = pgTable("invoices", {
   changeAmount: integer("change_amount").notNull().default(0),
   notes: text("notes"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
-}, (table) => ({
+}, (table: any) => ({
   branchIdx: index("invoice_branch_idx").on(table.branchId),
   dateIdx: index("invoice_date_idx").on(table.createdAt),
   therapistIdx: index("invoice_therapist_idx").on(table.therapistId),
   visitIdx: index("invoice_visit_idx").on(table.visitId),
   patientIdx: index("invoice_patient_idx").on(table.patientId),
   branchDateIdx: index("invoice_branch_date_idx").on(table.branchId, table.createdAt),
+  numberIdx: index("invoice_number_idx").on(table.invoiceNumber),
 }));
 
 export type Invoice = typeof invoices.$inferSelect;
@@ -506,7 +519,10 @@ export const staffPayrollReports = pgTable("staff_payroll_reports", {
   notes: text("notes"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
-});
+}, (table: any) => ({
+  staffIdx: index("spr_staff_idx").on(table.staffId),
+  monthIdx: index("spr_month_idx").on(table.month),
+}));
 
 export type StaffPayrollReport = typeof staffPayrollReports.$inferSelect;
 export type NewStaffPayrollReport = typeof staffPayrollReports.$inferInsert;
@@ -523,7 +539,9 @@ export const systemLogs = pgTable("system_logs", {
   entityId: text("entity_id").notNull(),
   details: text("details"), // JSON string info tambahan
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
-});
+}, (table: any) => ({
+  createdIdx: index("syslog_created_idx").on(table.createdAt),
+}));
 
 export type SystemLog = typeof systemLogs.$inferSelect;
 export type NewSystemLog = typeof systemLogs.$inferInsert;
@@ -543,7 +561,7 @@ export const promoBookings = pgTable("promo_bookings", {
   ticketCode: text("ticket_code"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
-}, (table) => ({
+}, (table: any) => ({
   dateIdx: index("promo_date_idx").on(table.bookingDate),
   phoneIdx: index("promo_phone_idx").on(table.phone),
   ticketIdx: index("promo_ticket_idx").on(table.ticketCode),
@@ -586,7 +604,7 @@ export const therapistMutations = pgTable("therapist_mutations", {
   // Timestamps
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
-}, (table) => ({
+}, (table: any) => ({
   therapistIdx: index("mutation_therapist_idx").on(table.therapistId),
   statusIdx: index("mutation_status_idx").on(table.status),
   dateIdx: index("mutation_date_idx").on(table.effectiveDate),
